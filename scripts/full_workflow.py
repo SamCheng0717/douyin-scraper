@@ -75,6 +75,44 @@ def ocr_image_file(path: Path) -> str:
 
 # ────────────────────── 工具函数 ────────────────────────────
 
+# 抖音导航栏噪音关键词（手机截屏里的 UI 文字）
+_NAV_NOISE = {
+    "抖音", "精选", "推荐", "搜索", "关注", "朋友", "我的",
+    "直播", "放映厅", "短剧", "小游戏", "AI搜索", "AI 搜索",
+    "进入全屏", "网页全屏", "不开启",
+}
+
+# 正则：匹配只含导航噪音的行（含 LaTeX、数字前缀等变体）
+import re as _re
+_NAV_LINE_PAT = _re.compile(
+    r"^[\s\$\^{}\d\(\)\[\]☐☑✓✗\*·\-–—]*"
+    r"(抖音|精选|推荐|AI.?搜索|关注\d*\+?|朋友|我的|直播|放映厅|短剧|\d*\s*小游戏|搜索)"
+    r"[\s\$\^{}\d\(\)\[\]☐☑✓✗\*·\-–—]*$"
+)
+
+def clean_ocr_text(text: str) -> str:
+    """去掉 OCR 结果中属于抖音导航栏的噪音段落"""
+    if not text:
+        return text
+    cleaned = []
+    for para in text.split("\n"):
+        stripped = para.strip()
+        # 跳过纯导航关键词行
+        words = set(_re.sub(r"[$^{}\d\s☐☑✓✗·()\[\]]", " ", stripped).split())
+        if words and words.issubset(_NAV_NOISE):
+            continue
+        # 跳过正则匹配的导航变体行
+        if _NAV_LINE_PAT.match(stripped):
+            continue
+        # 跳过只含 <div> 图片标签的行
+        if stripped.startswith("<div") and stripped.endswith(">"):
+            continue
+        cleaned.append(para)
+    result = "\n".join(cleaned)
+    result = _re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
+
+
 def parse_likes(text: str) -> int:
     try:
         text = text.strip().lower()
@@ -307,7 +345,8 @@ async def process_note(page, note_id: str, idx: int, keyword: str, no_ocr: bool)
             print(f"    [错误] 图{i+1}: {e}")
 
     note["images"] = [str(p) for p in saved_paths]
-    note["ocr_text"] = "\n\n---\n\n".join(ocr_texts)
+    raw = "\n\n---\n\n".join(ocr_texts)
+    note["ocr_text"] = clean_ocr_text(raw)
     return note
 
 
