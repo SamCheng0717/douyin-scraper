@@ -261,76 +261,60 @@ async def process_note(page, note_id: str, idx: int, keyword: str, no_ocr: bool)
     if no_ocr:
         return note
 
-    # ── 截图图片 ──
-    # 内容图片用 class otaLO99b 标识（大图），去重后截图
-    img_elements = await page.evaluate("""() => {
-        const seen = new Set();
-        const result = [];
-        // 优先用 otaLO99b 类（内容大图）
-        let imgs = Array.from(document.querySelectorAll('img[class*="otaLO99b"]'));
-        // 兜底：所有大图（宽或高 > 400），排除头像/logo
-        if (imgs.length === 0) {
-            imgs = Array.from(document.querySelectorAll('img')).filter(img => {
-                const w = img.naturalWidth || img.offsetWidth;
-                const h = img.naturalHeight || img.offsetHeight;
-                const src = img.src || '';
-                return (w > 400 || h > 400)
-                    && !src.includes('avatar')
-                    && !src.includes('static')
-                    && src.includes('douyinpic.com/tos-cn-i');
-            });
+    # ── 截图图片（支持轮播）──
+    # 检测总张数（从 "1/N" 指示器）
+    total_slides = await page.evaluate("""() => {
+        const all = Array.from(document.querySelectorAll('*'));
+        for (const el of all) {
+            if (el.children.length > 0) continue;
+            const m = el.textContent.trim().match(/^\\d+\\/(\\d+)$/);
+            if (m) return parseInt(m[1]);
         }
-        for (const img of imgs) {
-            // 用 src 前60字符去重（同一张图可能在 DOM 里出现两次）
-            const key = img.src.substring(0, 60);
-            if (!seen.has(key)) {
-                seen.add(key);
-                const rect = img.getBoundingClientRect();
-                result.push({x: rect.x, y: rect.y, w: rect.width, h: rect.height, src: img.src.substring(0,60)});
-            }
-        }
-        return result;
+        return document.querySelectorAll('img[class*="otaLO99b"]').length || 1;
     }""")
 
-    if not img_elements:
+    # 验证至少有一张图在视口内
+    has_img = await page.evaluate("""() => {
+        const imgs = Array.from(document.querySelectorAll('img[class*="otaLO99b"]'));
+        return imgs.some(img => {
+            const r = img.getBoundingClientRect();
+            return r.width > 100 && r.height > 100;
+        });
+    }""")
+
+    if not has_img:
         print(f"  [警告] 未找到内容图片")
         return note
 
-    print(f"  [图片] 找到 {len(img_elements)} 张内容图（去重后）")
-
-    # 重新查询元素用于截图（Playwright 需要 ElementHandle）
-    all_imgs = await page.query_selector_all('img[class*="otaLO99b"]')
-    if not all_imgs:
-        all_imgs = await page.query_selector_all('img')
-    # 去重筛选
-    seen_src = set()
-    deduped = []
-    for el in all_imgs:
-        src = await el.get_attribute("src") or ""
-        key = src[:60]
-        if key in seen_src:
-            continue
-        box = await el.bounding_box()
-        if not box or box["width"] < 200 or box["height"] < 200:
-            continue
-        if "avatar" in src or "static" in src:
-            continue
-        seen_src.add(key)
-        deduped.append(el)
-
-    if not deduped:
-        print(f"  [警告] 去重后无有效图片")
-        return note
-
-    print(f"  [图片] 实际截图数: {len(deduped)}")
+    print(f"  [图片] 共 {total_slides} 张（轮播）")
 
     ocr_texts = []
     saved_paths = []
 
-    for i, img_el in enumerate(deduped):
+    for i in range(total_slides):
         save_path = IMAGES_DIR / f"{keyword}_{idx}_{i+1}.png"
         try:
-            await img_el.screenshot(path=str(save_path))
+            # 截当前视口内居中的内容图
+            img_handle = await page.evaluate_handle("""() => {
+                const imgs = Array.from(document.querySelectorAll('img[class*="otaLO99b"]'));
+                const vw = window.innerWidth;
+                let best = null, bestScore = Infinity;
+                for (const img of imgs) {
+                    const r = img.getBoundingClientRect();
+                    if (r.width < 100 || r.height < 100) continue;
+                    const cx = r.x + r.width / 2;
+                    const dist = Math.abs(cx - vw / 2);
+                    if (dist < bestScore) { bestScore = dist; best = img; }
+                }
+                return best;
+            }""")
+            img_el = img_handle.as_element()
+            if img_el:
+                await img_el.screenshot(path=str(save_path))
+            else:
+                print(f"    [警告] 图{i+1} 未找到可见元素，跳过")
+                continue
+
             saved_paths.append(save_path)
             print(f"    [截图] 图{i+1} → {save_path.name}")
 
@@ -341,6 +325,27 @@ async def process_note(page, note_id: str, idx: int, keyword: str, no_ocr: bool)
                     print(f"    [OCR✓] {len(text)} 字符")
                 else:
                     print(f"    [OCR] 无文字")
+
+            # 点击下一张（最后一张不点）
+            if i < total_slides - 1:
+                clicked = await page.evaluate("""() => {
+                    // 找右侧箭头按钮（> 方向），排除 SVG
+                    const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+                    for (const btn of btns) {
+                        const r = btn.getBoundingClientRect();
+                        if (r.width < 5 || r.height < 5) continue;
+                        const cx = r.x + r.width / 2;
+                        if (cx > window.innerWidth * 0.6 && r.y > window.innerHeight * 0.3) {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+                if not clicked:
+                    await page.keyboard.press("ArrowRight")
+                await asyncio.sleep(0.8)
+
         except Exception as e:
             print(f"    [错误] 图{i+1}: {e}")
 
