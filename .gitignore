@@ -1,0 +1,15 @@
+*.log
+*.pyc
+__pycache__/
+
+
+data/*
+profile/*
+logs/*
+output/*
+
+.claude/
+.playwright-cli/
+
+llm_config.json
+.env
