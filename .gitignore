@@ -3,10 +3,10 @@
 __pycache__/
 
 
-data/*
-profile/*
-logs/*
-output/*
+data/
+profile/
+logs/
+output/
 
 .claude/
 .playwright-cli/
