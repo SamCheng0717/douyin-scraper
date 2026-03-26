@@ -2,6 +2,14 @@
 
 抖音图文笔记采集工具 — 搜索关键词，自动筛选「图文」类型，截图并 OCR 识别图片文字，输出 Markdown 报告。
 
+## 安装
+
+```bash
+npx clawhub@latest install douyin-scraper
+# 或
+npx skills@latest add SamCheng0717/douyin-scraper
+```
+
 ## 功能
 
 - 关键词搜索 + 自动筛选「图文 · 一周内」
