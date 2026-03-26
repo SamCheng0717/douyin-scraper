@@ -15,6 +15,8 @@
 - `scripts/llm_config.json` — LLM 配置文件
 - `scripts/ocr.py` — 独立 OCR 脚本（功能已内置于 full_workflow.py）
 - `scripts/scrape.py` / `scrape_fixed.py` / `scrape_with_images.py` / `scrape_and_ocr.py` — 旧版采集脚本
+- `scripts/db.py` — SQLite 模块（已废弃，full_workflow.py 不使用数据库）
+- `scripts/debug_*.py` / `scripts/test_*.py` 及其他调试脚本
 - `references/styles.md` — 二创风格说明
 
 ## [0.1.0] - 2026-03-25
